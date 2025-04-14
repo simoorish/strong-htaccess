@@ -1,0 +1,130 @@
+# Disable directory browsing
+Options -Indexes
+
+# Protect the .htaccess file
+<Files ".htaccess">
+    Require all denied
+</Files>
+
+# Prevent access to sensitive files
+<FilesMatch "\.(env|ini|log|sh|sql|bak|config|crt|key|pem)$">
+    Require all denied
+</FilesMatch>
+
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+
+    #################################################################
+    # Block disallowed HTTP methods (prevent TRACE, TRACK, DEBUG)   #
+    #################################################################
+    RewriteCond %{REQUEST_METHOD} ^(TRACE|TRACK|DEBUG)$ [NC]
+    RewriteRule .* - [F,L]
+
+    #################################################################
+    # Block directory traversal and suspicious URI patterns         #
+    #################################################################
+    RewriteCond %{REQUEST_URI} \.\./ [NC,OR]
+    RewriteCond %{REQUEST_URI} (select\s+.*from|union\s+select|insert\s+into|drop\s+table|update\s+.*set|concat\s*\() [NC]
+    RewriteRule .* - [F,L]
+
+    #################################################################
+    # Block SQL injection and XSS attempts via query string         #
+    #################################################################
+    RewriteCond %{QUERY_STRING} (<script|%3Cscript|javascript:|alert\() [NC,OR]
+    RewriteCond %{QUERY_STRING} (\.\./|~|`|etc/passwd|boot\.ini) [NC,OR]
+    RewriteCond %{QUERY_STRING} (select\s+.*from|union\s+select|insert\s+into|drop\s+table|update\s+.*set|concat\s*\() [NC]
+    RewriteRule .* - [F,L]
+
+    #################################################################
+    # Block password-based/brute-force tools by User-Agent          #
+    #################################################################
+    RewriteCond %{HTTP_USER_AGENT} (Hydra|JohnTheRipper|sqlmap) [NC]
+    RewriteRule .* - [F,L]
+
+    #################################################################
+    # Block fuzzing attempts (restrict specific special characters) #
+    #################################################################
+    RewriteCond %{QUERY_STRING} [\{\}\|<>] [NC]
+    RewriteRule .* - [F,L]
+
+    #################################################################
+    # Prevent image hotlinking                                      #
+    #################################################################
+    RewriteCond %{HTTP_REFERER} !^$
+    RewriteCond %{HTTP_REFERER} !^https?://(www\.)?example\.com/ [NC]
+    RewriteRule \.(jpg|jpeg|png|gif|bmp)$ - [F,L]
+
+    #################################################################
+    # Block phishing attempts (malicious redirects or fake pages)   #
+    #################################################################
+    RewriteCond %{REQUEST_URI} (fake-login\.php|spoof\.html|fraudulent) [NC]
+    RewriteRule .* - [F,L]
+
+    #################################################################
+    # Enforce HTTPS redirection                                     #
+    #################################################################
+    RewriteCond %{HTTPS} off
+    RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+</IfModule>
+
+###############################################################################
+# Limit upload file size to 10 MB (10 * 1024 * 1024 bytes)                    #
+###############################################################################
+LimitRequestBody 10485760
+
+###############################################################################
+# Restrict access to specific directories                              #
+###############################################################################
+<Directory "/var/www/html/includes">
+    Require all denied
+</Directory>
+
+###############################################################################
+# Block unwanted bots using User-Agent filtering                              #
+# Mark generic bot user agents as "bad_bot", but exclude known search engines #
+###############################################################################
+<IfModule mod_setenvif.c>
+    SetEnvIfNoCase User-Agent "^(?!.*(googlebot|bingbot|yahoo!slurp|duckduckbot)).*(curl|wget|python-requests|libwww-perl|scrapy)" bad_bot
+</IfModule>
+
+###############################################################################
+# Deny requests from bad bots                                                 #
+###############################################################################
+<IfModule mod_authz_core.c>
+    <RequireAll>
+        Require all granted
+        Require not env bad_bot
+    </RequireAll>
+</IfModule>
+
+###############################################################################
+# Add security headers to mitigate common attacks                             #
+###############################################################################
+<IfModule mod_headers.c>
+    Header set X-Frame-Options "DENY"
+    Header set X-Content-Type-Options "nosniff"
+    Header set Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline';"
+    Header set Referrer-Policy "strict-origin-when-cross-origin"
+    Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains"
+</IfModule>
+
+###############################################################################
+# Custom error pages for better user experience                               #
+###############################################################################
+ErrorDocument 403 /403.html
+ErrorDocument 404 /404.html
+
+###############################################################################
+# Mitigate Denial-of-Service (DoS) and IoT-Based attacks                      #
+###############################################################################
+<IfModule mod_reqtimeout.c>
+    RequestReadTimeout header=20-40,MinRate=500 body=20-40,MinRate=500
+</IfModule>
+
+###############################################################################
+# Address DNS tunneling attacks by blocking specific DNS query strings        #
+###############################################################################
+<IfModule mod_rewrite.c>
+    RewriteCond %{QUERY_STRING} (dns-query|tunneling) [NC]
+    RewriteRule .* - [F,L]
+</IfModule>
